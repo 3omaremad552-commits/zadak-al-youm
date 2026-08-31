@@ -33,6 +33,39 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Locate project files
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find_project_dir() {
+            local package_json
+            package_json="$(find "$1" -type f -name package.json \
+              -not -path '*/node_modules/*' \
+              -not -path '*/.git/*' -print -quit)"
+            if [ -n "$package_json" ]; then
+              dirname "$package_json"
+            fi
+          }
+
+          PROJECT_DIR="$(find_project_dir . || true)"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit || true)"
+            if [ -n "$ZIP_FILE" ]; then
+              mkdir -p extracted-project
+              unzip -q "$ZIP_FILE" -d extracted-project
+              PROJECT_DIR="$(find_project_dir extracted-project || true)"
+            fi
+          fi
+
+          test -n "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/package.json"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Using project directory: $PROJECT_DIR"
+
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -40,13 +73,13 @@ jobs:
         run: npx expo prebuild --platform android --non-interactive
 
       - name: Build debug APK
-        working-directory: android
         run: ./gradlew assembleDebug --no-daemon
+        working-directory: ${{ env.PROJECT_DIR }}/android
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: zadak-al-youm-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.locate.outputs.project_dir }}/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
