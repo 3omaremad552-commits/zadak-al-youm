@@ -39,47 +39,52 @@ jobs:
         run: |
           set -euo pipefail
 
-          find_project_dir() {
-            local package_json
-            package_json="$(find "$1" -type f -name package.json \
+          find_package_dir() {
+            find "$1" -type f -name package.json \
               -not -path '*/node_modules/*' \
-              -not -path '*/.git/*' -print -quit)"
-            if [ -n "$package_json" ]; then
-              dirname "$package_json"
-            fi
+              -not -path '*/.git/*' \
+              -print -quit | xargs -r dirname
           }
 
-          PROJECT_DIR="$(find_project_dir . || true)"
+          PROJECT_DIR="$(find_package_dir . || true)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit || true)"
+            ZIP_FILE="$(find . -type f -iname '*.zip' -not -path './.git/*' -print -quit || true)"
             if [ -n "$ZIP_FILE" ]; then
               mkdir -p extracted-project
               unzip -q "$ZIP_FILE" -d extracted-project
-              PROJECT_DIR="$(find_project_dir extracted-project || true)"
+              PROJECT_DIR="$(find_package_dir extracted-project || true)"
             fi
           fi
 
-          test -n "$PROJECT_DIR"
-          test -f "$PROJECT_DIR/package.json"
+          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/package.json" ]; then
+            echo 'لم يتم العثور على package.json.'
+            echo 'ارفع ملفات مشروع زادك اليوم أو ملف ZIP الخاص به إلى المستودع.'
+            echo 'الملفات الموجودة حاليًا:'
+            find . -maxdepth 4 -type f -not -path './.git/*' | head -100
+            exit 1
+          fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Using project directory: $PROJECT_DIR"
+          echo "تم العثور على المشروع في: $PROJECT_DIR"
 
       - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
         run: pnpm install --no-frozen-lockfile
 
       - name: Generate native Android project
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npx expo prebuild --platform android --non-interactive
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
         working-directory: ${{ env.PROJECT_DIR }}/android
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: zadak-al-youm-debug-apk
-          path: ${{ steps.locate.outputs.project_dir }}/android/app/build/outputs/apk/debug/app-debug.apk
+          name: zadak-al-youom-debug-apk
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
